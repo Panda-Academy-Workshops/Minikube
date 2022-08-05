@@ -1,0 +1,10 @@
+---
+roles:
+  - name: geerlingguy.docker
+    version: 4.1.3
+  - name: gantsign.minikube
+    version: 1.29.1
+
+collections:
+  - name: kubernetes.core
+    version: 2.2.3

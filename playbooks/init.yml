@@ -1,0 +1,110 @@
+---
+- name: 
+  hosts: all
+  become: true
+  vars:
+    docker_users:
+      - vagrant
+    docker_daemon_options:
+      insecure-registries : ["192.168.44.44:8082"]
+
+  tasks:
+  - name: Install packages
+    package:
+      name:
+        - pip
+        - conntrack
+        - bash-completion
+      state: present
+     
+  - name: Install kubernetes python package
+    pip:
+      name: 
+      - kubernetes==23.3.0
+
+  - name: Check the minikube status
+    command: minikube status
+    register: minikube_status
+    changed_when: false
+    ignore_errors: true
+
+  - name: Start minikube.
+    command: minikube start --driver=none --insecure-registry "192.168.44.44:8082"
+    when: "not minikube_status.stdout or 'Running' not in minikube_status.stdout"
+    
+  - name: Add an apt signing key for Kubernetes
+    apt_key:
+      url: https://packages.cloud.google.com/apt/doc/apt-key.gpg
+      state: present
+
+  - name: Adding apt repository for Kubernetes
+    apt_repository:
+      repo: deb https://apt.kubernetes.io/ kubernetes-xenial main
+      state: present
+      filename: kubernetes.list
+
+  - name: Install packages
+    package:
+      name:
+        - socat
+        - kubectl
+      state: present
+
+  - name: Configure kubectl command auto-completion
+    lineinfile:
+      dest: /root/.bashrc
+      line: 'source <(kubectl completion bash)'
+      insertafter: EOF
+
+  - name: Create kubernetes namespace
+    kubernetes.core.k8s:
+      name: argocd
+      api_version: v1
+      kind: Namespace
+      state: present
+
+  - name: Deploy ArgoCD 
+    kubernetes.core.k8s:
+      state: present
+      namespace: argocd
+      src: resources/argocd.yaml
+  
+  - name: Get ArgoCD admin password
+    shell: kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
+    register: password
+    retries: 120
+    delay: 2
+    until: password.stdout_lines[0] is defined
+
+  - name: Deploy ArgoCD Image Updater Configmap
+    kubernetes.core.k8s:
+      state: present
+      namespace: argocd
+      src: resources/argocd-image-updater.configmap.yaml
+
+  - name: Apply ArgoCD application objects
+    kubernetes.core.k8s:
+      definition: "{{ lookup('template', '{{ item }}') | from_yaml }}"
+    with_fileglob:
+      - "apps/*"
+
+  - name: Deploy ArgoCD Image Updater
+    kubernetes.core.k8s:
+      state: present
+      namespace: argocd
+      src: resources/argocd-image-updater.yaml
+  
+  - name: Forward the port 443 to 8080
+    shell: "nohup kubectl port-forward svc/argocd-server --address 0.0.0.0 -n argocd 8080:443 >/dev/null 2>&1 &"
+  
+  - debug:
+      msg:
+        - "ArgoCD Admin password: {{ password.stdout_lines[0] }}"
+
+  roles:
+    - packages
+    - geerlingguy.docker
+    - gantsign.minikube
+
+  collections:
+    - kubernetes.core
