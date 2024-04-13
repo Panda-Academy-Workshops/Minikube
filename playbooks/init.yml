@@ -29,7 +29,7 @@
     ignore_errors: true
 
   - name: Start minikube.
-    command: minikube start --driver=none --insecure-registry "192.168.44.44:8082"
+    command: minikube start --force --insecure-registry "192.168.44.44:8082"
     when: "not minikube_status.stdout or 'Running' not in minikube_status.stdout"
     
   - name: Add an apt signing key for Kubernetes
@@ -37,9 +37,25 @@
       url: https://packages.cloud.google.com/apt/doc/apt-key.gpg
       state: present
 
+  - name: Ensure /etc/apt/keyrings directory exists
+    file:
+      path: /etc/apt/keyrings
+      state: directory
+      mode: '0755'
+  
+  - name: Download Kubernetes repository GPG key
+    get_url:
+      url: https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key
+      dest: /tmp/kubernetes-release.key
+
+  - name: Add the GPG key for the Kubernetes repository
+    shell: gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg /tmp/kubernetes-release.key
+    args:
+      executable: /bin/bash
+    
   - name: Adding apt repository for Kubernetes
     apt_repository:
-      repo: deb https://apt.kubernetes.io/ kubernetes-xenial main
+      repo: deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /
       state: present
       filename: kubernetes.list
 
